@@ -1,0 +1,26 @@
+# 環境變數檔案
+.env
+.env.local
+.env.*.local
+
+# 依賴套件
+node_modules/
+
+# 日誌檔案
+logs/
+*.log
+npm-debug.log*
+
+# 作業系統檔案
+.DS_Store
+Thumbs.db
+
+# IDE 設定檔
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 建置輸出
+dist/
+build/
