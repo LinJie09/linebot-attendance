@@ -3,8 +3,8 @@ import mongoose from "mongoose";
 const groupSchema = new mongoose.Schema({
   groupId: { type: String, required: true },
   name: String,
-  leaderId: String,
-  viceLeaderId: String,
+  leaderId: String,     // 組長 LINE userId
+  viceLeaderId: String, // 副組長 LINE userId
 });
 
 export default mongoose.model("Group", groupSchema);
