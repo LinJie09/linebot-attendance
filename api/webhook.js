@@ -1,16 +1,12 @@
-// api/webhook.js
 import mongoose from "mongoose";
 import * as line from "@line/bot-sdk";
 import { config, handleEvent, client } from "../services/lineBot.js";
 import Attendance from "../models/Attendance.js";
 import Group from "../models/Group.js";
-import dotenv from "dotenv";
 
-dotenv.config();
-
-// -------------------------------
-// MongoDB 連線（只初始化一次）
 let isConnected = false;
+
+// MongoDB 只連一次
 async function connectDB() {
   if (isConnected) return;
   try {
@@ -26,21 +22,20 @@ async function connectDB() {
   }
 }
 
-// -------------------------------
 // Webhook handler
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
 
-  // 先快速回應 LINE，避免超時
+  // 先快速回應 LINE
   res.status(200).send("OK");
 
   try {
     await connectDB();
 
-    // 使用 LINE middleware 驗證
+    // 使用 middleware 解析 body
     line.middleware(config)(req, res, async () => {
       const events = req.body?.events || [];
-      for (const event of events) {
+      for (let event of events) {
         try {
           await handleEvent(event);
         } catch (err) {
@@ -53,22 +48,18 @@ export default async function handler(req, res) {
   }
 }
 
-// -------------------------------
-// Cron Job 提醒功能（Render Scheduled Task / Vercel Cron Job）
+// Cron Job 提醒功能
 export async function attendanceReminder() {
   try {
     await connectDB();
-
     const today = new Date().toISOString().split("T")[0];
     const records = await Attendance.find({ date: today });
     const reportedGroups = records.map((r) => r.groupId);
 
     const allGroups = await Group.find();
-    const unreportedGroups = allGroups.filter(
-      (g) => !reportedGroups.includes(g.groupId)
-    );
+    const unreported = allGroups.filter((g) => !reportedGroups.includes(g.groupId));
 
-    for (const g of unreportedGroups) {
+    for (let g of unreported) {
       try {
         await client.pushMessage([g.leaderId, g.viceLeaderId], {
           type: "text",
