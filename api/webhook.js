@@ -1,6 +1,6 @@
 // api/webhook.js
 import mongoose from "mongoose";
-import * as line from "@line/bot-sdk";
+import crypto from "crypto";
 import { config, handleEvent, client } from "../services/lineBot.js";
 import Attendance from "../models/Attendance.js";
 import Group from "../models/Group.js";
@@ -24,28 +24,37 @@ async function connectDB() {
   }
 }
 
+// 驗證 LINE 簽名
+function verifySignature(req) {
+  const signature = req.headers["x-line-signature"];
+  const body = JSON.stringify(req.body);
+  const hash = crypto
+    .createHmac("SHA256", config.channelSecret)
+    .update(body)
+    .digest("base64");
+  return signature === hash;
+}
+
 // Serverless Webhook Handler
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
 
-  // 先快速回應 LINE，避免超時
+  // 立即回 200 避免 LINE webhook 超時
   res.status(200).send("OK");
 
   try {
     await connectDB();
 
-    // 使用 LINE middleware 驗證
-    const middleware = line.middleware(config);
-    middleware(req, res, async () => {
-      const events = req.body.events || [];
-      events.forEach(async (event) => {
-        try {
-          await handleEvent(event);
-        } catch (err) {
-          console.error("handleEvent error:", err);
-        }
-      });
-    });
+    // 驗證 LINE 簽名
+    if (!verifySignature(req)) {
+      console.error("Invalid LINE signature");
+      return;
+    }
+
+    const events = req.body.events || [];
+    for (const event of events) {
+      handleEvent(event).catch((err) => console.error("handleEvent error:", err));
+    }
   } catch (err) {
     console.error("Webhook handler error:", err);
   }
@@ -63,7 +72,7 @@ export async function attendanceReminder() {
     const allGroups = await Group.find();
     const unreported = allGroups.filter((g) => !reportedGroups.includes(g.groupId));
 
-    for (let g of unreported) {
+    for (const g of unreported) {
       try {
         await client.pushMessage([g.leaderId, g.viceLeaderId], {
           type: "text",
