@@ -1,14 +1,12 @@
-// api/webhook.js
 import mongoose from "mongoose";
-import crypto from "crypto";
+import * as line from "@line/bot-sdk";
 import { config, handleEvent, client } from "../services/lineBot.js";
 import Attendance from "../models/Attendance.js";
 import Group from "../models/Group.js";
-import dotenv from "dotenv";
-dotenv.config();
 
-// MongoDB 連線只初始化一次
 let isConnected = false;
+
+// MongoDB 只連一次
 async function connectDB() {
   if (isConnected) return;
   try {
@@ -24,44 +22,35 @@ async function connectDB() {
   }
 }
 
-// 驗證 LINE 簽名
-function verifySignature(req) {
-  const signature = req.headers["x-line-signature"];
-  const body = JSON.stringify(req.body);
-  const hash = crypto
-    .createHmac("SHA256", config.channelSecret)
-    .update(body)
-    .digest("base64");
-  return signature === hash;
-}
-
-// Serverless Webhook Handler
+// Webhook handler
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
-
-  // 立即回 200 避免 LINE webhook 超時
-  res.status(200).send("OK");
 
   try {
     await connectDB();
 
-    // 驗證 LINE 簽名
-    if (!verifySignature(req)) {
-      console.error("Invalid LINE signature");
-      return;
-    }
-
-    const events = req.body.events || [];
-    for (const event of events) {
-      handleEvent(event).catch((err) => console.error("handleEvent error:", err));
-    }
+    // 使用 LINE middleware 驗證
+    const middleware = line.middleware(config);
+    middleware(req, res, async () => {
+      const events = req.body.events || [];
+      events.forEach(async (event) => {
+        try {
+          await handleEvent(event);
+        } catch (err) {
+          console.error("handleEvent error:", err);
+        }
+      });
+      // 這裡快速回應 LINE
+      res.status(200).send("OK");
+    });
   } catch (err) {
     console.error("Webhook handler error:", err);
+    res.status(500).send("Server error");
   }
 }
 
 // -------------------------------
-// Cron Job 提醒功能（Render Scheduled Task / Vercel Cron Job）
+// Cron Job 提醒功能（Render Scheduled Task 或 Vercel Cron Job）
 export async function attendanceReminder() {
   try {
     await connectDB();
@@ -72,7 +61,7 @@ export async function attendanceReminder() {
     const allGroups = await Group.find();
     const unreported = allGroups.filter((g) => !reportedGroups.includes(g.groupId));
 
-    for (const g of unreported) {
+    for (let g of unreported) {
       try {
         await client.pushMessage([g.leaderId, g.viceLeaderId], {
           type: "text",
