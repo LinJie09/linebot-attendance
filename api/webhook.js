@@ -1,12 +1,16 @@
+// api/webhook.js
 import mongoose from "mongoose";
 import * as line from "@line/bot-sdk";
 import { config, handleEvent, client } from "../services/lineBot.js";
 import Attendance from "../models/Attendance.js";
 import Group from "../models/Group.js";
+import dotenv from "dotenv";
 
+dotenv.config();
+
+// -------------------------------
+// MongoDB 連線（只初始化一次）
 let isConnected = false;
-
-// MongoDB 只連一次
 async function connectDB() {
   if (isConnected) return;
   try {
@@ -22,46 +26,49 @@ async function connectDB() {
   }
 }
 
+// -------------------------------
 // Webhook handler
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
+
+  // 先快速回應 LINE，避免超時
+  res.status(200).send("OK");
 
   try {
     await connectDB();
 
     // 使用 LINE middleware 驗證
-    const middleware = line.middleware(config);
-    middleware(req, res, async () => {
-      const events = req.body.events || [];
-      events.forEach(async (event) => {
+    line.middleware(config)(req, res, async () => {
+      const events = req.body?.events || [];
+      for (const event of events) {
         try {
           await handleEvent(event);
         } catch (err) {
           console.error("handleEvent error:", err);
         }
-      });
-      // 這裡快速回應 LINE
-      res.status(200).send("OK");
+      }
     });
   } catch (err) {
     console.error("Webhook handler error:", err);
-    res.status(500).send("Server error");
   }
 }
 
 // -------------------------------
-// Cron Job 提醒功能（Render Scheduled Task 或 Vercel Cron Job）
+// Cron Job 提醒功能（Render Scheduled Task / Vercel Cron Job）
 export async function attendanceReminder() {
   try {
     await connectDB();
+
     const today = new Date().toISOString().split("T")[0];
     const records = await Attendance.find({ date: today });
     const reportedGroups = records.map((r) => r.groupId);
 
     const allGroups = await Group.find();
-    const unreported = allGroups.filter((g) => !reportedGroups.includes(g.groupId));
+    const unreportedGroups = allGroups.filter(
+      (g) => !reportedGroups.includes(g.groupId)
+    );
 
-    for (let g of unreported) {
+    for (const g of unreportedGroups) {
       try {
         await client.pushMessage([g.leaderId, g.viceLeaderId], {
           type: "text",
