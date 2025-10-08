@@ -10,10 +10,7 @@ let isConnected = false;
 async function connectDB() {
   if (isConnected) return;
   try {
-    await mongoose.connect(process.env.MONGO_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
+    await mongoose.connect(process.env.MONGO_URI); // 最新 Mongoose，已經不需要 useUnifiedTopology
     console.log("✅ MongoDB connected");
     isConnected = true;
   } catch (err) {
@@ -29,17 +26,22 @@ export default async function handler(req, res) {
   try {
     await connectDB();
 
+    // LINE Middleware
     const middleware = line.middleware(config);
     middleware(req, res, async () => {
       const events = req.body.events || [];
-      events.forEach(async (event) => {
+
+      // 用 for...of 確保 await 正確執行
+      for (const event of events) {
         try {
           await handleEvent(event);
         } catch (err) {
           console.error("handleEvent error:", err);
         }
-      });
-      res.status(200).send("OK"); // 立即回應避免 LINE 超時
+      }
+
+      // 立即回應 LINE 避免超時
+      res.status(200).send("OK");
     });
   } catch (err) {
     console.error("Webhook handler error:", err);
@@ -47,24 +49,33 @@ export default async function handler(req, res) {
   }
 }
 
-// Cron Job 提醒功能（Render Scheduled Task / Vercel Cron Job）
+// Cron Job 提醒功能
 export async function attendanceReminder() {
-  await connectDB();
-  const today = new Date().toISOString().split("T")[0];
-  const records = await Attendance.find({ date: today });
-  const reportedGroups = records.map(r => r.groupId);
+  try {
+    await connectDB();
 
-  const allGroups = await Group.find();
-  const unreported = allGroups.filter(g => !reportedGroups.includes(g.groupId));
+    const today = new Date().toISOString().split("T")[0];
+    const records = await Attendance.find({ date: today });
+    const reportedGroups = records.map(r => r.groupId);
 
-  for (let g of unreported) {
-    try {
-      await client.pushMessage([g.leaderId, g.viceLeaderId], {
-        type: "text",
-        text: `⚠️ ${g.name} 今天還沒回報出勤，請盡快輸入 /點名 [人數]`
-      });
-    } catch (err) {
-      console.error("PushMessage error:", err);
+    const allGroups = await Group.find();
+    const unreported = allGroups.filter(g => !reportedGroups.includes(g.groupId));
+
+    for (const g of unreported) {
+      try {
+        // 確認 leaderId 和 viceLeaderId 都存在
+        const targets = [g.leaderId, g.viceLeaderId].filter(Boolean);
+        if (targets.length === 0) continue;
+
+        await client.pushMessage(targets, {
+          type: "text",
+          text: `⚠️ ${g.name} 今天還沒回報出勤，請盡快輸入 /點名 [人數]`,
+        });
+      } catch (err) {
+        console.error("PushMessage error:", err);
+      }
     }
+  } catch (err) {
+    console.error("attendanceReminder error:", err);
   }
 }
