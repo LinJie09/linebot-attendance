@@ -26,50 +26,45 @@ async function connectDB() {
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
 
-  // 先快速回應 LINE
-  res.status(200).send("OK");
-
   try {
     await connectDB();
 
-    // 使用 middleware 解析 body
-    line.middleware(config)(req, res, async () => {
-      const events = req.body?.events || [];
-      for (let event of events) {
+    const middleware = line.middleware(config);
+    middleware(req, res, async () => {
+      const events = req.body.events || [];
+      events.forEach(async (event) => {
         try {
           await handleEvent(event);
         } catch (err) {
           console.error("handleEvent error:", err);
         }
-      }
+      });
+      res.status(200).send("OK"); // 立即回應避免 LINE 超時
     });
   } catch (err) {
     console.error("Webhook handler error:", err);
+    res.status(500).send("Server error");
   }
 }
 
-// Cron Job 提醒功能
+// Cron Job 提醒功能（Render Scheduled Task / Vercel Cron Job）
 export async function attendanceReminder() {
-  try {
-    await connectDB();
-    const today = new Date().toISOString().split("T")[0];
-    const records = await Attendance.find({ date: today });
-    const reportedGroups = records.map((r) => r.groupId);
+  await connectDB();
+  const today = new Date().toISOString().split("T")[0];
+  const records = await Attendance.find({ date: today });
+  const reportedGroups = records.map(r => r.groupId);
 
-    const allGroups = await Group.find();
-    const unreported = allGroups.filter((g) => !reportedGroups.includes(g.groupId));
+  const allGroups = await Group.find();
+  const unreported = allGroups.filter(g => !reportedGroups.includes(g.groupId));
 
-    for (let g of unreported) {
-      try {
-        await client.pushMessage([g.leaderId, g.viceLeaderId], {
-          type: "text",
-          text: `⚠️ ${g.name} 今天還沒回報出勤，請盡快輸入 /點名 [人數]`,
-        });
-      } catch (err) {
-        console.error("PushMessage error:", err);
-      }
+  for (let g of unreported) {
+    try {
+      await client.pushMessage([g.leaderId, g.viceLeaderId], {
+        type: "text",
+        text: `⚠️ ${g.name} 今天還沒回報出勤，請盡快輸入 /點名 [人數]`
+      });
+    } catch (err) {
+      console.error("PushMessage error:", err);
     }
-  } catch (err) {
-    console.error("attendanceReminder error:", err);
   }
 }
