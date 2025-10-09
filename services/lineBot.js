@@ -58,7 +58,7 @@ async function handleEvent(event) {
     // 建立點名紀錄
     await Attendance.create({
       date: today,
-      groupId: userGroup.groupId,
+      groupName: userGroup.groupId,
       userId,
       count: validMembers.length,
       attendees: validMembers, // 建議在 Attendance schema 新增 attendees 欄位
