@@ -1,9 +1,9 @@
 // api/webhook.js
 import mongoose from "mongoose";
-import * as line from "@line/bot-sdk";
-import { config, handleEvent, client } from "../services/lineBot.js";
-import Attendance from "../models/Attendance.js";
-import Group from "../models/Group.js";
+// import * as line from "@line/bot-sdk";
+import { config, handleEvent} from "../services/lineBot.js";
+// import Attendance from "../models/Attendance.js";
+// import Group from "../models/Group.js";
 
 let isConnected = false;
 
@@ -29,18 +29,22 @@ export default async function handler(req, res) {
     await connectDB();
 
     // LINE middleware 驗證簽名
-    await new Promise((resolve, reject) => {
-      line.middleware(config)(req, res, (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
+    // await new Promise((resolve, reject) => {
+    //   line.middleware(config)(req, res, (err) => {
+    //     if (err) reject(err);
+    //     else resolve();
+    //   });
+    // });
 
+    // const events = req.body.events || [];
+    // if (!events.length) {
+    //   console.log("No events in request body");
+    //   return res.status(200).send("No events");
+    // }
     const events = req.body.events || [];
-    if (!events.length) {
-      console.log("No events in request body");
-      return res.status(200).send("No events");
-    }
+    if (!events.length) return res.status(200).send("No events");
+
+    
 
     // 處理所有事件
     for (const event of events) {
