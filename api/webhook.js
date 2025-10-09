@@ -21,33 +21,38 @@ async function connectDB() {
 
 // Webhook handler
 export default async function handler(req, res) {
-  // LINE Middleware
-  const middleware = line.middleware(config);
-
-  middleware(req, res, async () => {
     if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
-
+  
     try {
       await connectDB();
-
-      const events = req.body.events || [];
-
-      for (const event of events) {
-        try {
-          await handleEvent(event);
-        } catch (err) {
-          console.error("handleEvent error:", err);
+  
+      // LINE middleware 只驗證簽名，不用再放在回調裡
+      const middleware = line.middleware(config);
+      middleware(req, res, async () => {
+        const events = req.body.events || [];
+  
+        if (!events.length) {
+          console.log("No events in request body");
+          return res.status(200).send("No events");
         }
-      }
-
-      // 立即回應 LINE 避免 webhook 超時
-      res.status(200).send("OK");
+  
+        for (const event of events) {
+          try {
+            await handleEvent(event);
+          } catch (err) {
+            console.error("handleEvent error:", err);
+          }
+        }
+  
+        // 立即回應 LINE 避免 webhook 超時
+        res.status(200).send("OK");
+      });
     } catch (err) {
       console.error("Webhook handler error:", err);
       res.status(500).send("Server error");
     }
-  });
-}
+  }
+  
 
 // Cron Job 提醒功能
 export async function attendanceReminder() {
