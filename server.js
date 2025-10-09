@@ -1,26 +1,34 @@
 import express from "express";
 import dotenv from "dotenv";
 import * as line from "@line/bot-sdk";
-import { config } from "./services/lineBot.js"; // 你的 lineBot 服務
-import webhookHandler from "./api/webhook.js";
+import { handleEvent, config } from "./services/lineBot.js"; // 你剛剛寫的 handleEvent
 
 dotenv.config();
 
 const app = express();
-app.use(express.json());
 
-// ✅ 使用你自己寫的 webhookHandler 或直接在這裡處理
-app.post("/webhook", line.middleware(config), webhookHandler);
+// LINE middleware
+app.post("/webhook", line.middleware(config), async (req, res) => {
+  try {
+    // 確保所有事件都處理
+    await Promise.all(req.body.events.map(handleEvent));
+    res.status(200).end(); // ✅ 5 秒內回 200，避免「無法回覆」
+  } catch (err) {
+    console.error("Webhook Error:", err);
+    res.status(500).end();
+  }
+});
 
-// 測試用首頁
+// 測試 API
 app.get("/", (req, res) => {
-  res.send("✅ Line Bot Server is running");
+  res.send("LINE Bot 出勤系統已啟動 🚀");
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
+
 
 
 

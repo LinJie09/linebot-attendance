@@ -1,21 +1,16 @@
-// api/webhook.js
 import mongoose from "mongoose";
-import crypto from "crypto";
+import * as line from "@line/bot-sdk";
 import { config, handleEvent, client } from "../services/lineBot.js";
 import Attendance from "../models/Attendance.js";
 import Group from "../models/Group.js";
-import dotenv from "dotenv";
-dotenv.config();
 
-// MongoDB 連線只初始化一次
 let isConnected = false;
+
+// MongoDB 只連一次
 async function connectDB() {
   if (isConnected) return;
   try {
-    await mongoose.connect(process.env.MONGO_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
+    await mongoose.connect(process.env.MONGO_URI); // 最新 Mongoose，已經不需要 useUnifiedTopology
     console.log("✅ MongoDB connected");
     isConnected = true;
   } catch (err) {
@@ -24,57 +19,88 @@ async function connectDB() {
   }
 }
 
-// 驗證 LINE 簽名
-function verifySignature(req) {
-  const signature = req.headers["x-line-signature"];
-  const body = JSON.stringify(req.body);
-  const hash = crypto
-    .createHmac("SHA256", config.channelSecret)
-    .update(body)
-    .digest("base64");
-  return signature === hash;
-}
-
-// Serverless Webhook Handler
+// Webhook handler
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
 
-  // 立即回 200 避免 LINE webhook 超時
-  res.status(200).send("OK");
+  console.log("Webhook 收到 body:", req.body);
 
   try {
-    await connectDB();
-
-    // 驗證 LINE 簽名
-    if (!verifySignature(req)) {
-      console.error("Invalid LINE signature");
-      return;
+    // 嘗試連線資料庫，但失敗也不阻止 webhook 回應
+    try {
+      await connectDB();
+    } catch (err) {
+      console.error("MongoDB connect error:", err);
     }
 
     const events = req.body.events || [];
-    for (const event of events) {
-      handleEvent(event).catch((err) => console.error("handleEvent error:", err));
+    if (!events.length) {
+      console.log("No events in request body");
+      return res.status(200).send("No events");
     }
+
+    for (const event of events) {
+      try {
+        await handleEvent(event);
+      } catch (err) {
+        console.error("handleEvent error:", err);
+      }
+    }
+
+    // 一定要回 200 給 LINE
+    res.status(200).send("OK");
   } catch (err) {
-    console.error("Webhook handler error:", err);
+    console.error("Webhook outer error:", err);
+    // 即使出錯，也回 200 避免 LINE webhook 連續失敗
+    res.status(200).send("OK");
   }
+  //   try {
+  //     await connectDB();
+
+  //     // LINE Middleware
+  //     const middleware = line.middleware(config);
+  //     middleware(req, res, async () => {
+  //       const events = req.body.events || [];
+
+  //       // 用 for...of 確保 await 正確執行
+  //       for (const event of events) {
+  //         try {
+  //           await handleEvent(event);
+  //         } catch (err) {
+  //           console.error("handleEvent error:", err);
+  //         }
+  //       }
+
+  //       // 立即回應 LINE 避免超時
+  //       res.status(200).send("OK");
+  //     });
+  //   } catch (err) {
+  //     console.error("Webhook handler error:", err);
+  //     res.status(500).send("Server error");
+  //   }
 }
 
-// -------------------------------
-// Cron Job 提醒功能（Render Scheduled Task / Vercel Cron Job）
+// Cron Job 提醒功能
 export async function attendanceReminder() {
   try {
     await connectDB();
+
     const today = new Date().toISOString().split("T")[0];
     const records = await Attendance.find({ date: today });
     const reportedGroups = records.map((r) => r.groupId);
 
     const allGroups = await Group.find();
-    const unreported = allGroups.filter((g) => !reportedGroups.includes(g.groupId));
+    const unreported = allGroups.filter(
+      (g) => !reportedGroups.includes(g.groupId)
+    );
 
     for (const g of unreported) {
       try {
-        await client.pushMessage([g.leaderId, g.viceLeaderId], {
+        // 確認 leaderId 和 viceLeaderId 都存在
+        const targets = [g.leaderId, g.viceLeaderId].filter(Boolean);
+        if (targets.length === 0) continue;
+
+        await client.pushMessage(targets, {
           type: "text",
           text: `⚠️ ${g.name} 今天還沒回報出勤，請盡快輸入 /點名 [人數]`,
         });
@@ -86,14 +112,12 @@ export async function attendanceReminder() {
     console.error("attendanceReminder error:", err);
   }
 }
-
-
 // api/webhook.js
 // export default async function handler(req, res) {
 //     if (req.method !== "POST") {
 //       return res.status(405).send("Method Not Allowed");
 //     }
-  
+
 //     try {
 //       console.log("收到事件:", req.body); // 先在後端 log 出 body 內容
 //       return res.status(200).send("OK");   // 快速回應 LINE
@@ -102,4 +126,3 @@ export async function attendanceReminder() {
 //       return res.status(500).send("Server Error");
 //     }
 //   }
-  
