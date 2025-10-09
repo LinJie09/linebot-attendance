@@ -23,17 +23,17 @@ async function handleEvent(event) {
     $or: [
       { leaderId: userId },
       { viceLeaderId: userId },
-      { members: userId }, // 組員也能查詢
+      { members: userId },
     ],
   });
 
   // 點名（僅限組長/副組長）
   if (text.startsWith("/點名")) {
-    const count = parseInt(text.split(" ")[1], 10);
-    if (isNaN(count)) {
+    const membersToMark = text.split(" ").slice(1); // 取得點名成員列表
+    if (!membersToMark.length) {
       return client.replyMessage(event.replyToken, {
         type: "text",
-        text: "請輸入人數，例如：/點名 10",
+        text: "請輸入要點名的成員，例如：/點名 Alice Bob Charlie",
       });
     }
 
@@ -44,23 +44,37 @@ async function handleEvent(event) {
       });
     }
 
+    // 篩選小組內成員
+    const validMembers = (userGroup.members || []).filter(m => membersToMark.includes(m));
+    if (!validMembers.length) {
+      return client.replyMessage(event.replyToken, {
+        type: "text",
+        text: "⚠️ 沒有有效成員可點名，請確認小組成員名稱。",
+      });
+    }
+
+    // 建立點名紀錄
     await Attendance.create({
       date: today,
       groupId: userGroup.groupId,
       userId,
-      count,
+      count: validMembers.length,
+      attendees: validMembers, // 建議在 Attendance schema 新增 attendees 欄位
     });
 
+    // 使用 LINE Reply 回覆使用者
     await client.replyMessage(event.replyToken, {
       type: "text",
-      text: `✅ ${userGroup.name} 已登記 ${count} 人`,
+      text: `✅ ${userGroup.name} 點名成功！\n已出席成員: ${validMembers.join(", ")}\n總出席人數: ${validMembers.length}`,
     });
 
+    // 推播給負責人
     const responsibleId = process.env.RESPONSIBLE_PERSON_ID;
-    return client.pushMessage(responsibleId, {
+    await client.pushMessage(responsibleId, {
       type: "text",
-      text: `📌 ${userGroup.name} 今天 ${count} 人`,
+      text: `📌 ${userGroup.name} 今天已點名 ${validMembers.length} 人: ${validMembers.join(", ")}`,
     });
+    return;
   }
 
   // 查詢自己小組已點名
@@ -81,7 +95,7 @@ async function handleEvent(event) {
     return client.replyMessage(event.replyToken, {
       type: "text",
       text: record
-        ? `${userGroup.name} ${date} 已點名 ${record.count} 人 ✅`
+        ? `${userGroup.name} ${date} 已點名 ${record.count} 人 ✅\n成員: ${record.attendees?.join(", ") || ""}`
         : `${userGroup.name} ${date} 尚未點名`,
     });
   }
