@@ -1,3 +1,4 @@
+// api/webhook.js
 import mongoose from "mongoose";
 import * as line from "@line/bot-sdk";
 import { config, handleEvent, client } from "../services/lineBot.js";
@@ -21,38 +22,42 @@ async function connectDB() {
 
 // Webhook handler
 export default async function handler(req, res) {
-    if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
-  
-    try {
-      await connectDB();
-  
-      // LINE middleware 只驗證簽名，不用再放在回調裡
-      const middleware = line.middleware(config);
-      middleware(req, res, async () => {
-        const events = req.body.events || [];
-  
-        if (!events.length) {
-          console.log("No events in request body");
-          return res.status(200).send("No events");
-        }
-  
-        for (const event of events) {
-          try {
-            await handleEvent(event);
-          } catch (err) {
-            console.error("handleEvent error:", err);
-          }
-        }
-  
-        // 立即回應 LINE 避免 webhook 超時
-        res.status(200).send("OK");
+  // 僅接受 POST
+  if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
+
+  try {
+    await connectDB();
+
+    // LINE middleware 驗證簽名
+    await new Promise((resolve, reject) => {
+      line.middleware(config)(req, res, (err) => {
+        if (err) reject(err);
+        else resolve();
       });
-    } catch (err) {
-      console.error("Webhook handler error:", err);
-      res.status(500).send("Server error");
+    });
+
+    const events = req.body.events || [];
+    if (!events.length) {
+      console.log("No events in request body");
+      return res.status(200).send("No events");
     }
+
+    // 處理所有事件
+    for (const event of events) {
+      try {
+        await handleEvent(event);
+      } catch (err) {
+        console.error("handleEvent error:", err);
+      }
+    }
+
+    // 立即回應 LINE 避免 webhook 超時
+    res.status(200).send("OK");
+  } catch (err) {
+    console.error("Webhook handler error:", err);
+    res.status(500).send("Server error");
   }
-  
+}
 
 // Cron Job 提醒功能
 export async function attendanceReminder() {
@@ -83,19 +88,3 @@ export async function attendanceReminder() {
     console.error("attendanceReminder error:", err);
   }
 }
-
-// api/webhook.js
-// export default async function handler(req, res) {
-//     if (req.method !== "POST") {
-//       return res.status(405).send("Method Not Allowed");
-//     }
-  
-//     try {
-//       console.log("收到事件:", req.body); // 先在後端 log 出 body 內容
-//       return res.status(200).send("OK");   // 快速回應 LINE
-//     } catch (err) {
-//       console.error("Webhook handler error:", err);
-//       return res.status(500).send("Server Error");
-//     }
-//   }
-  
