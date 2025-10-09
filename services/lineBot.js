@@ -78,27 +78,88 @@ async function handleEvent(event) {
   }
 
   // 查詢自己小組已點名
-  if (text.startsWith("/已點名")) {
-    if (!userGroup) {
-      return client.replyMessage(event.replyToken, {
-        type: "text",
-        text: "⚠️ 你不屬於任何小組，無法查詢。",
-      });
+//   if (text.startsWith("/已點名")) {
+//     if (!userGroup) {
+//       return client.replyMessage(event.replyToken, {
+//         type: "text",
+//         text: "⚠️ 你不屬於任何小組，無法查詢。",
+//       });
+//     }
+
+//     const date = text.split(" ")[1] || today;
+//     const record = await Attendance.findOne({
+//       date,
+//       groupId: userGroup.groupId,
+//     });
+
+//     return client.replyMessage(event.replyToken, {
+//       type: "text",
+//       text: record
+//         ? `${userGroup.name} ${date} 已點名 ${record.count} 人 ✅\n成員: ${record.attendees?.join(", ") || ""}`
+//         : `${userGroup.name} ${date} 尚未點名`,
+//     });
+//   }
+
+  // 點名（僅限組長/副組長）
+if (text.startsWith("/點名")) {
+    const membersToMark = text.split(" ").slice(1); // 取得點名成員列表
+    if (!membersToMark.length) {
+      return client.replyMessage(event.replyToken, [
+        {
+          type: "text",
+          text: "請輸入要點名的成員，例如：/點名 Alice Bob Charlie",
+        },
+      ]);
     }
-
-    const date = text.split(" ")[1] || today;
-    const record = await Attendance.findOne({
-      date,
-      groupId: userGroup.groupId,
-    });
-
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text: record
-        ? `${userGroup.name} ${date} 已點名 ${record.count} 人 ✅\n成員: ${record.attendees?.join(", ") || ""}`
-        : `${userGroup.name} ${date} 尚未點名`,
-    });
+  
+    if (!userGroup || (userGroup.leaderId !== userId && userGroup.viceLeaderId !== userId)) {
+      return client.replyMessage(event.replyToken, [
+        { type: "text", text: "⚠️ 你不是組長或副組長，無法回報。" },
+      ]);
+    }
+  
+    // 篩選小組內成員
+    const validMembers = (userGroup.members || []).filter(m => membersToMark.includes(m));
+    if (!validMembers.length) {
+      return client.replyMessage(event.replyToken, [
+        { type: "text", text: "⚠️ 沒有有效成員可點名，請確認小組成員名稱。" },
+      ]);
+    }
+  
+    // ✅ 先立即回覆使用者
+    await client.replyMessage(event.replyToken, [
+      {
+        type: "text",
+        text: `✅ ${userGroup.name} 點名成功！\n已出席成員: ${validMembers.join(", ")}\n總出席人數: ${validMembers.length}`,
+      },
+    ]);
+  
+    // 🔄 非同步處理（存資料 & 推播通知負責人）
+    (async () => {
+      try {
+        await Attendance.create({
+          date: today,
+          groupId: userGroup.groupId,
+          userId,
+          count: validMembers.length,
+          attendees: validMembers,
+        });
+  
+        const responsibleId = process.env.RESPONSIBLE_PERSON_ID;
+        await client.pushMessage(responsibleId, {
+          type: "text",
+          text: `📌 ${userGroup.name} 今天已點名 ${validMembers.length} 人: ${validMembers.join(", ")}`,
+        });
+  
+        console.log("✅ 點名流程完成，資料已存 & 通知已送出");
+      } catch (err) {
+        console.error("❌ 點名流程錯誤:", err);
+      }
+    })();
+  
+    return;
   }
+  
 
   // 查詢自己小組未點名
   if (text.startsWith("/未點名")) {
